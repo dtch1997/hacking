@@ -223,7 +223,7 @@ sns.lineplot(x=range(len(mean_loss)), y=mean_loss)
 
 
 # Get belief states
-sequences = train_dataset[:][0].detach().cpu().numpy()
+sequences = train_dataset[:1000][0].detach().cpu().numpy()
 belief_statess = []
 for seq in sequences:
     belief_states = []
@@ -253,7 +253,7 @@ print(belief_statess_tensor.shape)
 
 # %%
 
-_, cache = model.run_with_cache(train_dataset[:][0])
+_, cache = model.run_with_cache(train_dataset[:1000][0])
 # for key in cache.keys():
 #     print(key)
 activations = cache['blocks.1.hook_resid_post']
@@ -278,19 +278,53 @@ print(flat_belief_states_tensor.shape)
 
 # Do activations cluster by belief state? 
 
+# PCA
 from sklearn.decomposition import PCA
-pca = PCA(n_components=2)
-X = pca.fit_transform(flat_activations.detach().cpu().numpy())
+import matplotlib.pyplot as plt
+reducer = PCA(n_components=2)
+X = reducer.fit_transform(flat_activations.detach().cpu().numpy())
 print(X.shape)
 
-# %% 
 sns.scatterplot(
     x = X[:, 0], 
     y = X[:, 1], 
     hue=flat_belief_states_tensor.detach().cpu().numpy()
 )
+plt.show()
+
+
+
+# %%
+# TSNE
+from sklearn.manifold import TSNE
+reducer = TSNE(n_components=2)
+X = reducer.fit_transform(flat_activations.detach().cpu().numpy())
+print(X.shape)
+
+sns.scatterplot(
+    x = X[:, 0], 
+    y = X[:, 1], 
+    hue=flat_belief_states_tensor.detach().cpu().numpy()
+)
+plt.show()
+
+# %%
+# Umap
+import umap.umap_ as umap
+reducer = umap.UMAP()
+X = reducer.fit_transform(flat_activations.detach().cpu().numpy())
+print(X.shape)
+
+sns.scatterplot(
+    x = X[:, 0], 
+    y = X[:, 1], 
+    hue=flat_belief_states_tensor.detach().cpu().numpy()
+)
+plt.show()
 
 # %% 
+
+# Fit a linear probe
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import SGDClassifier
