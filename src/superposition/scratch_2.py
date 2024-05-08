@@ -1,8 +1,14 @@
 # flake8: noqa
 # %%
+import torch
 import random
+import collections
 import transformer_lens as tl
 import sae_lens as sl
+from torch.optim import Adam
+from jaxtyping import Float, Int
+
+from torch.utils.data import DataLoader, TensorDataset
 
 state2idx = {
     'S0': 0,
@@ -56,51 +62,43 @@ def get_msp_state(sequence):
         else:
             raise ValueError(f"Invalid sequence: {sequence}")
 
-
-
-# %% 
-# Sanity check the data
-
 def get_dataset(
     n_samples: int = 10_000,
     seq_len: int = 10,
+    print_debug_info: bool = False,
 ):
     data = []
+    statess = []
     for _ in range(n_samples):
-        seq, _ = generate_z1r_sequence(seq_len)
+        seq, states = generate_z1r_sequence(seq_len)
         data.append(seq)
+        statess.append(states)
+
+    # Sanity check the states
+    if print_debug_info:
+        # Initial state distribution
+        init_state_counts = collections.defaultdict(int)
+        for states in statess:
+            init_state_counts[states[0]] += 1
+
+        print("Initial state distribution:")
+        for k, v in init_state_counts.items():
+            print(f"{k}: {v}")
+        
+        # Calculate statistics of transitions
+        counts = collections.defaultdict(int)
+        for states in statess:
+            for i in range(len(states) - 1):
+                counts[(states[i], states[i + 1])] += 1
+        
+        print("Transition counts:")
+        for k, v in counts.items():
+            print(f"{k}: {v}")
 
     data = [[int(c) for c in seq] for seq in data]
     data = torch.Tensor(data).to(torch.int64)
     dataset = TensorDataset(data)
     return dataset
-
-# dataset = get_dataset(n_samples = 100, seq_len = 10)
-# Initial state distribution
-statess = []
-for _ in range(100):
-    _, states = generate_z1r_sequence(10)
-    statess.append(states)
-
-init_state_counts = collections.defaultdict(int)
-for states in statess:
-    init_state_counts[states[0]] += 1
-
-for k, v in init_state_counts.items():
-    print(f"{k}: {v}")
-
-# Calculate statistics of transitions
-# %%
-import collections
-counts = collections.defaultdict(int)
-for states in statess:
-    for i in range(len(states) - 1):
-        counts[(states[i], states[i + 1])] += 1
-
-for k, v in counts.items():
-    print(f"{k}: {v}")
-
-# %%
 
 def init_model(
     n_layers: int = 2,       
@@ -126,32 +124,6 @@ def init_model(
     )
     model = tl.HookedTransformer(model_config)
     return model
-# %%
-
-data = []
-for _ in range(10_000):
-    seq, _ = generate_z1r_sequence(10)
-    data.append(seq)
-print(data)
-
-
-# %%
-
-import torch 
-# Split into list of lists
-data = [[int(c) for c in seq] for seq in data]
-data = torch.Tensor(data).to(torch.int64)
-data
-# %%
-from torch.utils.data import TensorDataset, DataLoader
-
-dataset = TensorDataset(data)
-train_data_loader = DataLoader(dataset, batch_size=1024, shuffle=True)
-print(next(iter(train_data_loader))[0].shape)
-# %%
-
-from torch.optim import Adam
-from jaxtyping import Float, Int
 
 def loss_fn(
     logits: Float[torch.Tensor, "n_batch n_seq n_dim"], 
@@ -196,13 +168,17 @@ def train_model(
 
         print(f"Epoch: {epoch} | loss: {loss.item():.3f}")
     return losses
-        
 
 # %%
+dataset = get_dataset(n_samples = 100, seq_len = 10, print_debug_info=True)
 
+# %%
 results = {}
 
-train_dataset = get_dataset()
+# %%
+# Train a model
+
+train_dataset = get_dataset(n_samples=10_000, seq_len=10)
 train_data_loader = DataLoader(train_dataset, batch_size=1024, shuffle=True)
 model = init_model(d_model = 128)
 model.to("cuda")
@@ -212,19 +188,21 @@ hist = train_model(
     n_epochs=10,
     learning_rate=1e-4,
 )
-results['first_try'] = hist
+results['train_model'] = hist
 
 
 # %%
+
+# Plot training results
 import seaborn as sns 
 import matplotlib.pyplot as plt
 sns.set_theme()
-# Run a few experiments
-hist = results['first_try']
+hist = results['train_model']
 sns.lineplot(x=range(len(hist)), y=hist)
-plt.yscale('log')
 # %%
 
+# Test the model and plot per-token next-token loss
+# We expect to see this decrease over token position
 test_dataset = get_dataset(n_samples=1000, seq_len=10)
 test_data_loader = DataLoader(test_dataset, batch_size=1024, shuffle=False)
 
@@ -239,7 +217,5 @@ for batch in test_data_loader:
 
 losses = torch.cat(losses, dim=0)
 mean_loss = losses.mean(dim=0).detach().cpu().numpy()
-print(mean_loss.shape)
-# plot mean loss
 sns.lineplot(x=range(len(mean_loss)), y=mean_loss)
 # %%
