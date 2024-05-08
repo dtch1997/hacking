@@ -56,6 +56,8 @@ def get_msp_state(sequence):
         else:
             raise ValueError(f"Invalid sequence: {sequence}")
 
+
+
 # %% 
 # Sanity check the data
 
@@ -73,6 +75,19 @@ def get_dataset(
     dataset = TensorDataset(data)
     return dataset
 
+# dataset = get_dataset(n_samples = 100, seq_len = 10)
+# Initial state distribution
+statess = []
+for _ in range(100):
+    _, states = generate_z1r_sequence(10)
+    statess.append(states)
+
+init_state_counts = collections.defaultdict(int)
+for states in statess:
+    init_state_counts[states[0]] += 1
+
+for k, v in init_state_counts.items():
+    print(f"{k}: {v}")
 
 # Calculate statistics of transitions
 # %%
@@ -187,6 +202,8 @@ def train_model(
 
 results = {}
 
+train_dataset = get_dataset()
+train_data_loader = DataLoader(train_dataset, batch_size=1024, shuffle=True)
 model = init_model(d_model = 128)
 model.to("cuda")
 hist = train_model(
@@ -206,9 +223,6 @@ sns.set_theme()
 hist = results['first_try']
 sns.lineplot(x=range(len(hist)), y=hist)
 plt.yscale('log')
-
-# %%
-data.mean(dim=0)
 # %%
 
 test_dataset = get_dataset(n_samples=1000, seq_len=10)
