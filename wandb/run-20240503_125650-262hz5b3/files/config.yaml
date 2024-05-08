@@ -1,0 +1,213 @@
+wandb_version: 1
+
+model_name:
+  desc: null
+  value: othello-gpt
+model_class_name:
+  desc: null
+  value: HookedTransformer
+hook_point:
+  desc: null
+  value: blocks.6.hook_resid_post
+hook_point_eval:
+  desc: null
+  value: blocks.{layer}.attn.pattern
+hook_point_layer:
+  desc: null
+  value: 6
+hook_point_head_index:
+  desc: null
+  value: null
+dataset_path:
+  desc: null
+  value: taufeeque/othellogpt
+is_dataset_tokenized:
+  desc: null
+  value: true
+context_size:
+  desc: null
+  value: 512
+use_cached_activations:
+  desc: null
+  value: false
+cached_activations_path:
+  desc: null
+  value: null
+d_in:
+  desc: null
+  value: 512
+d_sae:
+  desc: null
+  value: 8192
+b_dec_init_method:
+  desc: null
+  value: geometric_median
+expansion_factor:
+  desc: null
+  value: 16
+activation_fn:
+  desc: null
+  value: relu
+normalize_sae_decoder:
+  desc: null
+  value: true
+noise_scale:
+  desc: null
+  value: 0.0
+from_pretrained_path:
+  desc: null
+  value: null
+apply_b_dec_to_input:
+  desc: null
+  value: true
+decoder_orthogonal_init:
+  desc: null
+  value: false
+n_batches_in_buffer:
+  desc: null
+  value: 64
+training_tokens:
+  desc: null
+  value: 10000
+finetuning_tokens:
+  desc: null
+  value: 0
+store_batch_size:
+  desc: null
+  value: 16
+train_batch_size:
+  desc: null
+  value: 4096
+device:
+  desc: null
+  value: cuda
+seed:
+  desc: null
+  value: 42
+dtype:
+  desc: null
+  value: torch.float32
+prepend_bos:
+  desc: null
+  value: true
+adam_beta1:
+  desc: null
+  value: 0
+adam_beta2:
+  desc: null
+  value: 0.999
+mse_loss_normalization:
+  desc: null
+  value: null
+l1_coefficient:
+  desc: null
+  value: 0.001
+lp_norm:
+  desc: null
+  value: 1.0
+lr:
+  desc: null
+  value: 0.0008
+lr_scheduler_name:
+  desc: null
+  value: constant
+lr_warm_up_steps:
+  desc: null
+  value: 10000
+lr_end:
+  desc: null
+  value: 8.0e-05
+lr_decay_steps:
+  desc: null
+  value: 0
+n_restart_cycles:
+  desc: null
+  value: 1
+finetuning_method:
+  desc: null
+  value: null
+use_ghost_grads:
+  desc: null
+  value: false
+feature_sampling_window:
+  desc: null
+  value: 1000
+dead_feature_window:
+  desc: null
+  value: 1000
+dead_feature_threshold:
+  desc: null
+  value: 0.0001
+log_to_wandb:
+  desc: null
+  value: true
+wandb_project:
+  desc: null
+  value: sae_lens_tutorial
+run_name:
+  desc: null
+  value: 8192-L1-0.001-LR-0.0008-Tokens-1.000e+04
+wandb_entity:
+  desc: null
+  value: null
+wandb_log_frequency:
+  desc: null
+  value: 10
+n_checkpoints:
+  desc: null
+  value: 0
+checkpoint_path:
+  desc: null
+  value: checkpoints/3y19xq6y
+verbose:
+  desc: null
+  value: true
+model_kwargs:
+  desc: null
+  value: {}
+sae_lens_version:
+  desc: null
+  value: 1.3.0
+sae_lens_training_version:
+  desc: null
+  value: 1.3.0
+tokens_per_buffer:
+  desc: null
+  value: 134217728
+_wandb:
+  desc: null
+  value:
+    python_version: 3.11.9
+    cli_version: 0.16.6
+    framework: huggingface
+    huggingface_version: 4.40.1
+    is_jupyter_run: false
+    is_kaggle_kernel: false
+    start_time: 1714737410.0
+    t:
+      1:
+      - 1
+      - 11
+      - 49
+      - 51
+      - 55
+      - 71
+      - 105
+      2:
+      - 1
+      - 11
+      - 49
+      - 51
+      - 55
+      - 71
+      - 105
+      3:
+      - 13
+      - 16
+      - 23
+      4: 3.11.9
+      5: 0.16.6
+      6: 4.40.1
+      8:
+      - 5
+      13: linux-x86_64
