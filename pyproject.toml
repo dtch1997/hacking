@@ -11,6 +11,7 @@ dependencies = [
     "sae-lens>=1.3.0",
     "datasets>=2.19.0",
     "evaluate>=0.4.2",
+    "seaborn>=0.13.2",
 ]
 requires-python = ">=3.11"
 readme = "README.md"
