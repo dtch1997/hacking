@@ -64,7 +64,7 @@ def get_msp_state(sequence):
 
 def get_dataset(
     n_samples: int = 10_000,
-    seq_len: int = 10,
+    seq_len: int = 16,
     print_debug_info: bool = False,
 ):
     data = []
@@ -113,7 +113,7 @@ def init_model(
         n_heads=n_heads,
         d_mlp=256,
         d_vocab=2,
-        n_ctx=10,
+        n_ctx=16,
         normalization_type="LN",
         act_fn="relu",
         # attn_only=True,
@@ -178,7 +178,7 @@ results = {}
 # %%
 # Train a model
 
-train_dataset = get_dataset(n_samples=10_000, seq_len=10)
+train_dataset = get_dataset(n_samples=10_240, seq_len=10)
 train_data_loader = DataLoader(train_dataset, batch_size=1024, shuffle=True)
 model = init_model(d_model = 128)
 model.to("cuda")
@@ -203,7 +203,7 @@ sns.lineplot(x=range(len(hist)), y=hist)
 
 # Test the model and plot per-token next-token loss
 # We expect to see this decrease over token position
-test_dataset = get_dataset(n_samples=1000, seq_len=10)
+test_dataset = get_dataset(n_samples=1024, seq_len=10)
 test_data_loader = DataLoader(test_dataset, batch_size=1024, shuffle=False)
 
 losses = []
@@ -218,4 +218,166 @@ for batch in test_data_loader:
 losses = torch.cat(losses, dim=0)
 mean_loss = losses.mean(dim=0).detach().cpu().numpy()
 sns.lineplot(x=range(len(mean_loss)), y=mean_loss)
+
+# %% 
+
+
+# Get belief states
+sequences = train_dataset[:][0].detach().cpu().numpy()
+belief_statess = []
+for seq in sequences:
+    belief_states = []
+    for i in range(len(seq)):
+        partial_seq = seq[:i]
+        partial_seq_as_str = ''.join(map(str, partial_seq))
+        belief_states.append(get_msp_state(partial_seq_as_str))
+    belief_statess.append(belief_states)
+    # belief_states.append(
+    #     [get_msp_state(''.join(map(str, seq[:i]))) for i in range(1, len(seq))]
+    # )
+
+belief2idx = {
+    'n0': 0,
+    'n10': 1,
+    'n11': 2,
+    'n101': 3,
+    'S0': 4,
+    'S1': 5,
+    'SR': 6,
+}
+idx2belief = {v: k for k, v in belief2idx.items()}
+
+belief_statess_idx = [[belief2idx[belief] for belief in beliefs] for beliefs in belief_statess]
+belief_statess_tensor = torch.Tensor(belief_statess_idx).to(torch.int64)
+print(belief_statess_tensor.shape)
+
+# %%
+
+_, cache = model.run_with_cache(train_dataset[:][0])
+# for key in cache.keys():
+#     print(key)
+activations = cache['blocks.1.hook_resid_post']
+print(activations.shape)
+
+# %%
+
+import einops 
+flat_activations = einops.rearrange(
+    activations, 
+    'n_batch n_seq n_dim -> (n_batch n_seq) n_dim'
+)
+print(flat_activations.shape)
+
+flat_belief_states_tensor = einops.rearrange(
+    belief_statess_tensor,
+    'n_batch n_seq -> (n_batch n_seq)'
+)
+print(flat_belief_states_tensor.shape)
+
+# %% 
+
+# Do activations cluster by belief state? 
+
+from sklearn.decomposition import PCA
+pca = PCA(n_components=2)
+X = pca.fit_transform(flat_activations.detach().cpu().numpy())
+print(X.shape)
+
+# %% 
+sns.scatterplot(
+    x = X[:, 0], 
+    y = X[:, 1], 
+    hue=flat_belief_states_tensor.detach().cpu().numpy()
+)
+
+# %% 
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import SGDClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import make_pipeline
+X = flat_activations.detach().cpu().numpy()
+Y = flat_belief_states_tensor.detach().cpu().numpy()
+X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=42)
+# Always scale the input. The most convenient way is to use a pipeline.
+clf = make_pipeline(StandardScaler(),
+                    SGDClassifier(max_iter=1000, tol=1e-3))
+clf.fit(X_train, Y_train)
+
+# %% 
+from sklearn.metrics import accuracy_score
+Y_pred = clf.predict(X_test)
+accuracy_score(Y_test, Y_pred)
+
+# %%
+
+# Does the SAE learn features corresponding to belief state? 
+import wandb
+
+def train_sae(
+    sae, train_loader, steps = 10_000
+):
+    # scheduler = LambdaLR(sae.optimizer, lr_lambda=lambda t: min(5*(1 - t/steps), 1.0))
+
+    for batch in train_loader:
+        x, _ = batch
+        x.to("cuda")
+        x_hid, *rest = sae.encode(x)
+        x_hat = sae.decode(x_hid)
+        
+        losses = sae.loss(x, x_hid, x_hat, sae.step / steps, *rest)
+        metrics = sae.calculate_metrics(x_hid, losses, sae.step, *rest)
+
+        loss = (losses.reconstruction + sae.sparsities * losses.sparsity + losses.auxiliary).sum()
+
+        sae.optimizer.zero_grad()
+        loss.backward()
+        sae.optimizer.step()
+
+        print(f"Step: {sae.step} | loss: {loss.item():.3f}")
+
+
+import sys
+import pathlib
+project_dir = pathlib.Path(__file__).parent.parent.parent
+# print(project_dir)
+sys.path.append(str(project_dir))
+
+# Train an SAE on the model
+from src.superposition.base import Config
+from src.superposition.utils import Sampler
+from src.superposition.vanilla import VanillaSAE
+
+config = Config(
+    n_buffers=500, 
+    expansion=4, 
+    buffer_size=2**17, 
+    sparsities=(0.01, 0.02, 0.04, 0.07, 0.14, 0.27, 0.52, 1.00)
+)
+sae = VanillaSAE(config, model).cuda()
+
+# Sanity check 
+print(sae)
+print(sae.b_dec.shape)
+print(sae.W_enc.shape)
+                
+# %%
+sae_train_dataset = TensorDataset(flat_activations.unsqueeze(0), flat_belief_states_tensor.unsqueeze(0))
+sae_train_loader = DataLoader(sae_train_dataset, batch_size=1024, shuffle=True)
+print(sae_train_dataset[0][0].shape)
+train_sae(sae, sae_train_loader)
+
+
+# %%
+from src.superposition.utils import get_splits
+train, valid = get_splits()
+print(train)
+print(valid)
+
+# %%
+torch.backends.cudnn.benchmark = True
+sae.train(sampler, model, test_dataset, log=False)
+
+# Look at highly-activating examples for SAE features
+
 # %%
