@@ -1,5 +1,6 @@
 # flake8: noqa
 # %%
+import torch
 import sys
 sys.path.append("/workspace/smol-sae")
 import torch.nn.functional as F
@@ -21,7 +22,6 @@ from datasets import load_dataset
 # assume gradients have a batch dim
 
 def loss(
-    sae, 
     x: Float[Tensor, "batch d_model"], 
     x_rec:  Float[Tensor, "batch d_model"], 
     sae_acts:  Float[Tensor, "batch d_sae"], 
@@ -44,39 +44,79 @@ def loss(
         + alpha * attr_loss 
         + beta * unexplained_loss
     )
-
-gradients = {}
-
-def fwd_patch_model_with_sae(act, hook, sae):
-    sae_out, hidden = sae(act)[:2]
-    sae_err = act - sae_out.detach()
-    return sae_out + sae_err 
-
-def bwd_patch_model_gradient(grad_act, hook):
-    global gradients 
-    gradients[hook.name] = grad_act.detach()
-    return grad_act
-
 # %%
-
 device = "cuda"
 model = tl.HookedTransformer.from_pretrained("gelu-1l")
-print(model.hooks)
-config = Config(
-    n_buffers=100, expansion=4, buffer_size=2**8, sparsities=(0.1, 1.0), device=device
-)
-sae = VanillaSAE(config, model)
-
+for hook_point in model.hook_points():
+    print(hook_point.name)
+# %%
 train_dataset = load_dataset(
     "NeelNanda/c4-tokenized-2b", split="train", streaming=True
 ).with_format("torch")
 train_batch = list(train_dataset.take(32))
-
-model.run_with_hooks(
-    train_batch,
-    fwd_hooks=[("", partial(fwd_patch_model_with_sae, sae=sae))],
-    bwd_hooks=[("", bwd_patch_model_gradient)],
-)
+print(train_batch)
 
 # %%
+config = Config(
+    n_buffers=100, expansion=4, buffer_size=2**8, sparsities=(0.1, 1.0), device=device
+)
+sae = VanillaSAE(config, model)
+print(sae.d_model)
+print(model.cfg.d_model)
 
+# %% 
+print(sae.n_instances)
+print(sae.W_dec.shape)
+print(sae.W_enc.shape)
+print(train_batch[0]["tokens"].shape)
+
+# %%
+import einops
+import collections
+
+tensors = collections.defaultdict(dict)
+
+def fwd_patch_model_with_sae(
+    act: Float[Tensor, "batch seq d_model"], 
+    hook: tl.hook_points.HookPoint, 
+    sae: VanillaSAE
+):
+    global tensors
+    act_repeat: Float[Tensor, "batch seq inst d_model"] = einops.repeat(act, "batch seq d_model -> batch seq inst d_model", inst = sae.n_instances)
+    sae_in = einops.rearrange(act_repeat, "batch seq inst d_model -> (batch seq) inst d_model")
+    sae_hid: torch.Tensor = sae.encode(sae_in)[0]
+    sae_out: torch.Tensor = sae.decode(sae_hid)
+    sae_err =  sae_in - sae_out.detach()
+    sae_rec: Float[Tensor, "batchseq inst d_model"] = sae_out + sae_err 
+    act_rec = (sae_out + sae_err).view(*act_repeat.shape)
+    sae_err.retain_grad()
+    sae_hid.retain_grad()
+    # mean along the instance dim
+    tensors[hook.name]["x"] = act_repeat
+    tensors[hook.name]["x_rec"] = act_rec
+    tensors[hook.name]["sae_acts"] = sae_hid
+    return act_rec.mean(dim=2)
+
+def bwd_patch_model_gradient(grad_act, hook):
+    global tensors 
+    tensors[hook.name]["grad_x"] = grad_act.detach()
+    sae_acts = tensors[hook.name]["sae_acts"]
+    tensors[hook.name]["grad_sae_acts"] = sae_acts.grad
+    # return (grad_act,)
+
+model.reset_hooks()
+model.set_use_hook_mlp_in(True)
+with model.hooks(
+    fwd_hooks=[("blocks.0.hook_mlp_in", partial(fwd_patch_model_with_sae, sae=sae))],
+    bwd_hooks=[("blocks.0.hook_mlp_in", bwd_patch_model_gradient)],
+):
+    logits = model(train_batch[0]["tokens"].to(device))
+    print(logits.shape)
+    logits[0,0,0].backward()
+    # sae(train_batch[0]["input_ids"])
+# %%
+for k, v in tensors['blocks.0.hook_mlp_in'].items():
+    print(k, v.norm())
+
+# %%
+# Next steps: 
